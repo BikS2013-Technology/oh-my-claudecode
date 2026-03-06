@@ -8,6 +8,7 @@ import { executeTeamApiOperation as executeCanonicalTeamApiOperation, resolveTea
 import { killWorkerPanes } from '../team/tmux-session.js';
 import { validateTeamName } from '../team/team-name.js';
 import { monitorTeam, resumeTeam, shutdownTeam } from '../team/runtime.js';
+import { readTeamConfig } from '../team/monitor.js';
 
 const JOB_ID_PATTERN = /^omc-[a-z0-9]{1,12}$/;
 const VALID_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini']);
@@ -475,6 +476,29 @@ export async function cleanupTeamJob(jobId: string, graceMs = 10_000): Promise<T
 
 export async function teamStatusByTeamName(teamName: string, cwd = process.cwd()): Promise<Record<string, unknown>> {
   validateTeamName(teamName);
+
+  const runtimeV2 = await import('../team/runtime-v2.js');
+  if (runtimeV2.isRuntimeV2Enabled()) {
+    const snapshot = await runtimeV2.monitorTeamV2(teamName, cwd);
+    if (!snapshot) {
+      return {
+        teamName,
+        running: false,
+        error: 'Team state not found',
+      };
+    }
+
+    const config = await readTeamConfig(teamName, cwd);
+    return {
+      teamName,
+      running: true,
+      sessionName: config?.tmux_session,
+      leaderPaneId: config?.leader_pane_id,
+      workerPaneIds: (config?.workers ?? []).map((worker) => worker.pane_id).filter((paneId): paneId is string => typeof paneId === 'string'),
+      snapshot,
+    };
+  }
+
   const runtime = await resumeTeam(teamName, cwd);
   if (!runtime) {
     return {
@@ -519,6 +543,19 @@ export async function teamResumeByName(teamName: string, cwd = process.cwd()): P
 export async function teamShutdownByName(teamName: string, options: { cwd?: string; force?: boolean } = {}): Promise<Record<string, unknown>> {
   validateTeamName(teamName);
   const cwd = options.cwd ?? process.cwd();
+
+  const runtimeV2 = await import('../team/runtime-v2.js');
+  if (runtimeV2.isRuntimeV2Enabled()) {
+    const config = await readTeamConfig(teamName, cwd);
+    await runtimeV2.shutdownTeamV2(teamName, cwd, { force: Boolean(options.force) });
+    return {
+      teamName,
+      shutdown: true,
+      forced: Boolean(options.force),
+      sessionFound: Boolean(config),
+    };
+  }
+
   const runtime = await resumeTeam(teamName, cwd);
 
   if (!runtime) {

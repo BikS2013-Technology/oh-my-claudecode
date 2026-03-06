@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   resumeTeam: vi.fn(),
   monitorTeam: vi.fn(),
   shutdownTeam: vi.fn(),
+  isRuntimeV2Enabled: vi.fn(() => false),
+  monitorTeamV2: vi.fn(),
+  shutdownTeamV2: vi.fn(),
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -24,6 +27,17 @@ vi.mock('../../team/tmux-session.js', async (importOriginal) => {
   return {
     ...actual,
     killWorkerPanes: mocks.killWorkerPanes,
+  };
+});
+
+
+vi.mock('../../team/runtime-v2.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../team/runtime-v2.js')>();
+  return {
+    ...actual,
+    isRuntimeV2Enabled: mocks.isRuntimeV2Enabled,
+    monitorTeamV2: mocks.monitorTeamV2,
+    shutdownTeamV2: mocks.shutdownTeamV2,
   };
 });
 
@@ -49,6 +63,10 @@ describe('team cli', () => {
     mocks.resumeTeam.mockReset();
     mocks.monitorTeam.mockReset();
     mocks.shutdownTeam.mockReset();
+    mocks.isRuntimeV2Enabled.mockReset();
+    mocks.isRuntimeV2Enabled.mockReturnValue(false);
+    mocks.monitorTeamV2.mockReset();
+    mocks.shutdownTeamV2.mockReset();
   });
 
   afterEach(() => {
@@ -274,6 +292,58 @@ describe('team cli', () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
+
+  it('team status uses runtime-v2 snapshot when enabled', async () => {
+    const { teamCommand } = await import('../team.js');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    mocks.isRuntimeV2Enabled.mockReturnValue(true);
+    mocks.monitorTeamV2.mockResolvedValue({
+      teamName: 'demo-team',
+      phase: 'team-exec',
+      workers: [],
+      tasks: { total: 1, pending: 0, blocked: 0, in_progress: 1, completed: 0, failed: 0, items: [] },
+      taskCounts: { pending: 0, inProgress: 1, completed: 0, failed: 0 },
+      deadWorkers: [],
+      nonReportingWorkers: [],
+      recommendations: [],
+      allTasksTerminal: false,
+      performance: { total_ms: 1, list_tasks_ms: 1, worker_scan_ms: 0, mailbox_delivery_ms: 0, updated_at: new Date().toISOString() },
+      monitorPerformance: { listTasksMs: 0, workerScanMs: 0, totalMs: 0 },
+    });
+
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-v2-status-'));
+    const root = join(cwd, '.omc', 'state', 'team', 'demo-team');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, 'config.json'), JSON.stringify({
+      name: 'demo-team',
+      task: 'demo',
+      agent_type: 'executor',
+      worker_count: 1,
+      max_workers: 20,
+      tmux_session: 'demo-session:0',
+      workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1' }],
+      created_at: new Date().toISOString(),
+      next_task_id: 2,
+      leader_pane_id: '%0',
+      hud_pane_id: null,
+      resize_hook_name: null,
+      resize_hook_target: null,
+    }));
+
+    await teamCommand(['status', 'demo-team', '--json', '--cwd', cwd]);
+
+    expect(mocks.monitorTeamV2).toHaveBeenCalledWith('demo-team', cwd);
+    expect(mocks.resumeTeam).not.toHaveBeenCalled();
+    const payload = JSON.parse(logSpy.mock.calls[0][0] as string) as { running: boolean; snapshot: { phase: string }; workerPaneIds: string[] };
+    expect(payload.running).toBe(true);
+    expect(payload.snapshot.phase).toBe('team-exec');
+    expect(payload.workerPaneIds).toEqual(['%1']);
+
+    rmSync(cwd, { recursive: true, force: true });
+    logSpy.mockRestore();
+  });
+
   it('team status supports team-name target via runtime snapshot', async () => {
     const { teamCommand } = await import('../team.js');
 
@@ -331,6 +401,47 @@ describe('team cli', () => {
     expect(payload.resumed).toBe(true);
     expect(payload.activeWorkers).toBe(1);
 
+    logSpy.mockRestore();
+  });
+
+
+  it('team shutdown uses runtime-v2 shutdown when enabled', async () => {
+    const { teamCommand } = await import('../team.js');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    mocks.isRuntimeV2Enabled.mockReturnValue(true);
+    mocks.shutdownTeamV2.mockResolvedValue(undefined);
+
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-v2-shutdown-'));
+    const root = join(cwd, '.omc', 'state', 'team', 'beta-team');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, 'config.json'), JSON.stringify({
+      name: 'beta-team',
+      task: 'beta',
+      agent_type: 'executor',
+      worker_count: 1,
+      max_workers: 20,
+      tmux_session: 'beta-session:0',
+      workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1' }],
+      created_at: new Date().toISOString(),
+      next_task_id: 2,
+      leader_pane_id: '%0',
+      hud_pane_id: null,
+      resize_hook_name: null,
+      resize_hook_target: null,
+    }));
+
+    await teamCommand(['shutdown', 'beta-team', '--force', '--json', '--cwd', cwd]);
+
+    expect(mocks.shutdownTeamV2).toHaveBeenCalledWith('beta-team', cwd, { force: true });
+    expect(mocks.resumeTeam).not.toHaveBeenCalled();
+    expect(mocks.shutdownTeam).not.toHaveBeenCalled();
+    const payload = JSON.parse(logSpy.mock.calls[0][0] as string) as { shutdown: boolean; forced: boolean; sessionFound: boolean };
+    expect(payload.shutdown).toBe(true);
+    expect(payload.forced).toBe(true);
+    expect(payload.sessionFound).toBe(true);
+
+    rmSync(cwd, { recursive: true, force: true });
     logSpy.mockRestore();
   });
 
