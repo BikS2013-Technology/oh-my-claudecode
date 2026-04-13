@@ -21,6 +21,11 @@ const mockCapturePaneContent = vi.fn<(paneId: string, lines?: number) => string>
 vi.mock("../../features/rate-limit-wait/tmux-detector.js", () => ({
   capturePaneContent: (paneId: string, lines?: number) => mockCapturePaneContent(paneId, lines),
 }));
+const mockGetNewPaneTail = vi.fn<(paneId: string, stateDir: string, maxLines?: number) => string>();
+vi.mock("../../features/rate-limit-wait/pane-fresh-capture.js", () => ({
+  getNewPaneTail: (paneId: string, stateDir: string, maxLines?: number) =>
+    mockGetNewPaneTail(paneId, stateDir, maxLines),
+}));
 
 // Mock config - use forwarding fns so we can swap implementations per-test
 const mockGetNotificationConfig = vi.fn();
@@ -90,6 +95,7 @@ describe("notify() -> session-registry integration", () => {
     mockShouldIncludeTmuxTail.mockReturnValue(false);
     mockGetTmuxTailLines.mockReturnValue(15);
     mockCapturePaneContent.mockReturnValue("");
+    mockGetNewPaneTail.mockReturnValue("");
   });
 
   afterEach(() => {
@@ -212,7 +218,7 @@ describe("notify() -> session-registry integration", () => {
   it("captures tmux tail using the configured line count", async () => {
     mockShouldIncludeTmuxTail.mockReturnValue(true);
     mockGetTmuxTailLines.mockReturnValue(23);
-    mockCapturePaneContent.mockReturnValue("line 1\nline 2");
+    mockGetNewPaneTail.mockReturnValue("line 1\nline 2");
 
     vi.stubGlobal(
       "fetch",
@@ -229,7 +235,31 @@ describe("notify() -> session-registry integration", () => {
     });
 
     expect(result).not.toBeNull();
-    expect(mockCapturePaneContent).toHaveBeenCalledWith("%42", 23);
+    expect(mockGetNewPaneTail).toHaveBeenCalledWith("%42", "/test/project/.omc/state", 23);
+    expect(mockCapturePaneContent).not.toHaveBeenCalled();
+  });
+
+  it("falls back to direct pane capture when projectPath is unavailable", async () => {
+    mockShouldIncludeTmuxTail.mockReturnValue(true);
+    mockGetTmuxTailLines.mockReturnValue(12);
+    mockCapturePaneContent.mockReturnValue("runtime failure");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: "discord-msg-tail-fallback" }),
+      }),
+    );
+
+    const result = await notify("session-idle", {
+      sessionId: "sess-tail-no-project",
+    });
+
+    expect(result).not.toBeNull();
+    expect(mockGetNewPaneTail).not.toHaveBeenCalled();
+    expect(mockCapturePaneContent).toHaveBeenCalledWith("%42", 12);
   });
 
   it("does NOT register when tmuxPaneId is unavailable", async () => {
