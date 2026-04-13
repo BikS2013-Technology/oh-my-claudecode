@@ -434,6 +434,19 @@ describe("parseTmuxTail noise filters", () => {
       "Runtime error: worker crashed after SIGTERM\nThe failure is actionable: restart the pane and rerun the task",
     );
   });
+
+  it("preserves vitest runtime failure prose while collapsing structured literals", () => {
+    const input = [
+      'mcp: {"jsonrpc":"2.0","error":{"code":"operation_failed","message":"claim_conflict"}}',
+      '+ const payload = { status: "failed", error: "claim_conflict" };',
+      "Error: Cannot find module vitest",
+      "failed to load config from /tmp/x/vitest.config.ts",
+    ].join("\n");
+
+    expect(parseTmuxTail(input)).toBe(
+      "Error: Cannot find module vitest\nfailed to load config from /tmp/x/vitest.config.ts",
+    );
+  });
 });
 
 describe("tmuxTail in formatters", () => {

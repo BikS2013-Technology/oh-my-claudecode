@@ -262,6 +262,37 @@ describe("notify() -> session-registry integration", () => {
     expect(mockCapturePaneContent).toHaveBeenCalledWith("%42", 12);
   });
 
+  it("keeps vitest runtime failure prose in delivered tmux tails while filtering literal noise", async () => {
+    mockShouldIncludeTmuxTail.mockReturnValue(true);
+    mockGetTmuxTailLines.mockReturnValue(12);
+    mockGetNewPaneTail.mockReturnValue([
+      'mcp: {"jsonrpc":"2.0","error":{"code":"operation_failed","message":"claim_conflict"}}',
+      '+ const payload = { status: "failed", error: "claim_conflict" };',
+      "Error: Cannot find module vitest",
+      "failed to load config from /tmp/x/vitest.config.ts",
+    ].join("\n"));
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "discord-msg-vitest-tail" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await notify("session-idle", {
+      sessionId: "sess-tail-vitest",
+      projectPath: "/test/project",
+    });
+
+    expect(result).not.toBeNull();
+    const [, requestInit] = fetchMock.mock.calls[0] as [string, { body?: string }];
+    const body = JSON.parse(requestInit.body ?? "{}") as { content?: string };
+    expect(body.content).toContain("Error: Cannot find module vitest");
+    expect(body.content).toContain("failed to load config from /tmp/x/vitest.config.ts");
+    expect(body.content).not.toContain('mcp: {"jsonrpc":"2.0"');
+    expect(body.content).not.toContain('+ const payload = { status: "failed", error: "claim_conflict" };');
+  });
+
   it("does NOT register when tmuxPaneId is unavailable", async () => {
     mockGetCurrentTmuxPaneId.mockReturnValue(null);
 

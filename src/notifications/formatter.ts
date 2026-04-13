@@ -219,7 +219,7 @@ const DIFF_HEADER_LINE_RE = /^(?:diff --git\b|index\s+[0-9a-f]{6,}\.\.[0-9a-f]{6
 const STRUCTURED_ALERT_KEYWORD_RE =
   /\b(?:error|errors?|fail(?:ed|ure|ures)?|conflict|conflicts|operation_failed|claim_conflict|invalid_transition|blocked_dependency|worker_notify_failed)\b/i;
 const JSONISH_LINE_RE =
-  /^(?:[{[]|"(?:[^"\\]|\\.)+"\s*:|'(?:[^'\\]|\\.)+'\s*:|[A-Za-z_$][\w$-]*\s*:\s*(?:[{["']|[^ ]))/;
+  /^(?:[{[]|"(?:[^"\\]|\\.)+"\s*:|'(?:[^'\\]|\\.)+'\s*:)/;
 const REQUEST_RESPONSE_LITERAL_RE =
   /^(?:payload|request|response|input|output|args|params|body|mcp)\s*[:=]\s*[{[]/i;
 const CODE_LITERAL_PREFIX_RE =
