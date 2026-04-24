@@ -125,6 +125,9 @@ describe('native worktree contract fields', () => {
   it('write-worker-identity accepts the full worktree metadata payload', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'omc-worktree-identity-'));
     try {
+      const { mkdir } = await import('fs/promises');
+      await mkdir(join(cwd, '.omc', 'state', 'team', 'demo-team', 'workers', 'worker-1'), { recursive: true });
+
       const result = await executeTeamApiOperation('write-worker-identity', {
         team_name: 'demo-team',
         worker: 'worker-1',
